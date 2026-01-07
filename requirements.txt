@@ -1,0 +1,8 @@
+streamlit
+firebase-admin
+google-generativeai
+pymupdf
+requests
+pillow
+pandas
+bcrypt
