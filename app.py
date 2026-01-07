@@ -22,19 +22,15 @@ else:
     st.error("🚨 APIキーが設定されていません。")
     st.stop()
 
+# --- Firebase 初期化（Streamlit Cloud専用） ---
 if not firebase_admin._apps:
-    try:
-        cred = credentials.Certificate(
-    json.loads(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
-)
-        firebase_admin.initialize_app(cred)
-    except:
-        if "firebase" in st.secrets:
-            key_dict = json.loads(st.secrets["firebase"]["json_key"])
-            cred = credentials.Certificate(key_dict)
-            firebase_admin.initialize_app(cred)
+    firebase_json = json.loads(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
+    cred = credentials.Certificate(firebase_json)
+    firebase_admin.initialize_app(cred)
 
+# --- Firestore ---
 db = firestore.client()
+
 
 st.set_page_config(page_title="スクールクイズ Quest", layout="wide", page_icon="🏫")
 
