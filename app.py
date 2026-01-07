@@ -24,7 +24,9 @@ else:
 
 if not firebase_admin._apps:
     try:
-        cred = credentials.Certificate("serviceAccountKey.json")
+        cred = credentials.Certificate(
+    json.loads(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
+)
         firebase_admin.initialize_app(cred)
     except:
         if "firebase" in st.secrets:
