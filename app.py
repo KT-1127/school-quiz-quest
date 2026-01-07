@@ -12,6 +12,7 @@ import base64
 from collections import Counter
 import random
 import pandas as pd
+import json
 
 # =========================================================
 # 1. APIキー & 設定
@@ -24,7 +25,8 @@ else:
 
 # --- Firebase 初期化（Streamlit Cloud専用） ---
 if not firebase_admin._apps:
-    cred = credentials.Certificate(dict(st.secrets["firebase"]))
+    firebase_json = json.loads(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
+    cred = credentials.Certificate(firebase_json)
     firebase_admin.initialize_app(cred)
 
 # --- Firestore ---
