@@ -3,8 +3,7 @@ import fitz  # PyMuPDF
 import requests
 import json
 import firebase_admin
-from firebase_admin import credentials
-from firebase_admin import firestore
+from firebase_admin import credentials, firestore
 import datetime
 from PIL import Image
 import io
@@ -12,7 +11,6 @@ import base64
 from collections import Counter
 import random
 import pandas as pd
-import json
 
 # =========================================================
 # 1. APIキー & 設定
@@ -24,13 +22,19 @@ else:
     st.stop()
 
 # --- Firebase 初期化（Streamlit Cloud専用） ---
-if not firebase_admin._apps:
+# --- Firebase 初期化（Streamlit Cloud / ローカル共通・安定版） ---
+@st.cache_resource
+def init_firebase():
     firebase_json = json.loads(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
     cred = credentials.Certificate(firebase_json)
-    firebase_admin.initialize_app(cred)
+    return firebase_admin.initialize_app(cred)
+
+# 初期化（※ 何回 rerun されても1回だけ）
+init_firebase()
 
 # --- Firestore ---
 db = firestore.client()
+
 
 
 st.set_page_config(page_title="スクールクイズ Quest", layout="wide", page_icon="🏫")
@@ -177,17 +181,53 @@ def analyze_pdf(uploaded_file, show_name, user_nickname):
     return quizzes
 
 # =========================================================
-# 3. ログイン画面
+# users 最小情報をキャッシュ取得
 # =========================================================
+@st.cache_data(ttl=300)
+def load_user_index():
+    """
+    ログイン画面用：
+    real_name と uid だけを取得
+    """
+    docs = db.collection("users").stream()
+    return {
+        doc.to_dict().get("real_name"): doc.id
+        for doc in docs
+        if "real_name" in doc.to_dict()
+    }
+
+# =========================================================
+# 3. ログイン画面（高速・安定版）
+# =========================================================
+
+@st.cache_data(ttl=300)
+def get_users_min():
+    """
+    ログイン用の最小データのみ取得（キャッシュ）
+    """
+    docs = db.collection("users").stream()
+    users = []
+    for d in docs:
+        data = d.to_dict()
+        users.append({
+            "uid": d.id,
+            "real_name": data.get("real_name", ""),
+            "password": data.get("password", ""),
+            "nickname": data.get("nickname", ""),
+            "role": data.get("role", "student")
+        })
+    return users
+
+
 def login_page():
     st.title("🏫 ログイン")
+
     col1, col2 = st.columns([1, 2])
-    
-    users_ref = db.collection("users")
-    docs = users_ref.stream()
-    user_dict = {doc.to_dict()["real_name"]: doc for doc in docs}
-    user_names = sorted(list(user_dict.keys()))
-    
+
+    users = get_users_min()
+    user_dict = {u["real_name"]: u for u in users}
+    user_names = sorted(user_dict.keys())
+
     with col1:
         if not user_names:
             st.warning("ユーザーがいません。")
@@ -196,25 +236,30 @@ def login_page():
                 a_pass = st.text_input("パスワード", type="password")
                 if st.button("作成"):
                     db.collection("users").add({
-                        "real_name": a_name, "password": a_pass, "nickname": a_name, "role": "teacher",
-                        "created_at": datetime.datetime.now(), "score": 0, "category_scores": {}
+                        "real_name": a_name,
+                        "password": a_pass,
+                        "nickname": a_name,
+                        "role": "teacher",
+                        "created_at": datetime.datetime.now(),
+                        "score": 0,
+                        "category_scores": {}
                     })
+                    st.cache_data.clear()
                     st.rerun()
         else:
             name = st.selectbox("名前を選択", ["選択してください"] + user_names)
             password = st.text_input("パスワード", type="password")
-            
+
             if st.button("ログイン", type="primary"):
                 if name != "選択してください":
-                    user_doc = user_dict[name]
-                    u_data = user_doc.to_dict()
-                    if u_data["password"] == password:
-                        u_data["uid"] = user_doc.id
-                        st.session_state["user"] = u_data
+                    u = user_dict[name]
+                    if u["password"] == password:
+                        st.session_state["user"] = u
                         st.success("ログイン成功！")
                         st.rerun()
                     else:
                         st.error("パスワードが違います")
+
 
 # =========================================================
 # 4. アプリ本体
@@ -376,8 +421,15 @@ elif menu == "🎮 クイズを解く":
             q = doc.to_dict()
             qid = doc.id
             
-            realtime_doc = db.collection("quizzes").document(qid).get()
-            current_likes = realtime_doc.to_dict().get("likes", 0)
+                # --- likes 非リアルタイム用キャッシュ ---
+            if "likes_cache" not in st.session_state:
+                st.session_state["likes_cache"] = {}
+
+            if qid not in st.session_state["likes_cache"]:
+                st.session_state["likes_cache"][qid] = q.get("likes", 0)            
+                current_likes = st.session_state["likes_cache"][qid]
+
+            
             
             st.progress((idx+1)/len(q_list))
             
@@ -412,19 +464,36 @@ elif menu == "🎮 クイズを解く":
                     st.info(f"解説: {q.get('answer')}")
                 
                 # いいね機能
-                like_ref = db.collection("quizzes").document(qid).collection("likes").document(user["uid"])
+                # --- いいね（非リアルタイム） ---
+                like_ref = (
+                    db.collection("quizzes")
+                    .document(qid)
+                    .collection("likes")
+                    .document(user["uid"])
+                )
+
                 is_liked = like_ref.get().exists
-                
+
                 btn_label = "❤️ いいねを取り消す" if is_liked else "❤️ いいね！"
-                
+
                 if st.button(btn_label, key=f"like{idx}"):
+
                     if is_liked:
                         like_ref.delete()
-                        db.collection("quizzes").document(qid).update({"likes": firestore.Increment(-1)})
+                        db.collection("quizzes").document(qid).update({
+                            "likes": firestore.Increment(-1)
+                        })
+                        st.session_state["likes_cache"][qid] -= 1
+
                     else:
                         like_ref.set({"ts": datetime.datetime.now()})
-                        db.collection("quizzes").document(qid).update({"likes": firestore.Increment(1)})
+                        db.collection("quizzes").document(qid).update({
+                            "likes": firestore.Increment(1)
+                        })
+                        st.session_state["likes_cache"][qid] += 1
+
                     st.rerun()
+
                 
                 st.caption(f"現在のいいね: {current_likes}")
 
