@@ -307,17 +307,23 @@ if menu == "👨‍🏫 先生メニュー":
             batch.commit()
             st.success("登録しました")
     with tab2:
-        if st.button("更新"): st.rerun()
-        docs = db.collection("users").stream()
-        data = []
-        for d in docs:
-            dd = d.to_dict()
-            row = {"名前": dd.get("real_name"), "ニックネーム": dd.get("nickname")}
-            cat_scores = dd.get("category_scores", {})
-            for c in RANKING_CATEGORIES:
-                row[c] = cat_scores.get(c, 0)
-            data.append(row)
-        st.dataframe(pd.DataFrame(data))
+        @st.cache_data(ttl=60)
+        def get_grades_data():
+            docs = db.collection("users").stream()
+            data = []
+            for d in docs:
+                dd = d.to_dict()
+                row = {"名前": dd.get("real_name"), "ニックネーム": dd.get("nickname")}
+                cat_scores = dd.get("category_scores", {})
+                for c in RANKING_CATEGORIES:
+                    row[c] = cat_scores.get(c, 0)
+                data.append(row)
+            return data
+
+        if st.button("🔄 更新"):
+            st.cache_data.clear()
+            st.rerun()
+        st.dataframe(pd.DataFrame(get_grades_data()))
 
 # --- 問題作成 ---
 elif menu == "📝 問題を作る":
@@ -463,8 +469,7 @@ elif menu == "🎮 クイズを解く":
                     st.error(f"❌ 不正解... 正解は: {choices[correct]}")
                     st.info(f"解説: {q.get('answer')}")
                 
-                # いいね機能
-                # --- いいね（非リアルタイム） ---
+                # いいね機能（キャッシュ版 - 読み取り削減）
                 like_ref = (
                     db.collection("quizzes")
                     .document(qid)
@@ -472,7 +477,14 @@ elif menu == "🎮 クイズを解く":
                     .document(user["uid"])
                 )
 
-                is_liked = like_ref.get().exists
+                # is_liked をセッションにキャッシュ（初回のみ読み取り）
+                if "is_liked_cache" not in st.session_state:
+                    st.session_state["is_liked_cache"] = {}
+
+                if qid not in st.session_state["is_liked_cache"]:
+                    st.session_state["is_liked_cache"][qid] = like_ref.get().exists
+
+                is_liked = st.session_state["is_liked_cache"][qid]
 
                 btn_label = "❤️ いいねを取り消す" if is_liked else "❤️ いいね！"
                 current_likes = st.session_state["likes_cache"].get(qid, 0)
@@ -485,6 +497,7 @@ elif menu == "🎮 クイズを解く":
                             "likes": firestore.Increment(-1)
                         })
                         st.session_state["likes_cache"][qid] -= 1
+                        st.session_state["is_liked_cache"][qid] = False
 
                     else:
                         like_ref.set({"ts": datetime.datetime.now()})
@@ -492,6 +505,7 @@ elif menu == "🎮 クイズを解く":
                             "likes": firestore.Increment(1)
                         })
                         st.session_state["likes_cache"][qid] += 1
+                        st.session_state["is_liked_cache"][qid] = True
 
                     st.rerun()
 
@@ -533,8 +547,16 @@ elif menu == "🏆 ランキング":
 
     st.header("🏆 ジャンル別ランキング（全表示）")
 
-    docs = list(db.collection("users").stream())
-    users = [d.to_dict() for d in docs]
+    @st.cache_data(ttl=60)
+    def get_ranking_users():
+        docs = list(db.collection("users").stream())
+        return [d.to_dict() for d in docs]
+
+    users = get_ranking_users()
+
+    if st.button("🔄 更新"):
+        st.cache_data.clear()
+        st.rerun()
 
     for cat in RANKING_CATEGORIES:
 
