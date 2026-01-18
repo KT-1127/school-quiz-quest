@@ -475,6 +475,7 @@ elif menu == "🎮 クイズを解く":
                 is_liked = like_ref.get().exists
 
                 btn_label = "❤️ いいねを取り消す" if is_liked else "❤️ いいね！"
+                current_likes = st.session_state["likes_cache"].get(qid, 0)
 
                 if st.button(btn_label, key=f"like{idx}"):
 
