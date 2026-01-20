@@ -181,26 +181,10 @@ def analyze_pdf(uploaded_file, show_name, user_nickname):
     return quizzes
 
 # =========================================================
-# users 最小情報をキャッシュ取得
-# =========================================================
-@st.cache_data(ttl=300)
-def load_user_index():
-    """
-    ログイン画面用：
-    real_name と uid だけを取得
-    """
-    docs = db.collection("users").stream()
-    return {
-        doc.to_dict().get("real_name"): doc.id
-        for doc in docs
-        if "real_name" in doc.to_dict()
-    }
-
-# =========================================================
 # 3. ログイン画面（高速・安定版）
 # =========================================================
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)  # 1時間キャッシュ
 def get_users_min():
     """
     ログイン用の最小データのみ取得（キャッシュ）
@@ -307,7 +291,7 @@ if menu == "👨‍🏫 先生メニュー":
             batch.commit()
             st.success("登録しました")
     with tab2:
-        @st.cache_data(ttl=60)
+        @st.cache_data(ttl=3600)  # 1時間キャッシュ
         def get_grades_data():
             docs = db.collection("users").stream()
             data = []
@@ -547,7 +531,7 @@ elif menu == "🏆 ランキング":
 
     st.header("🏆 ジャンル別ランキング（全表示）")
 
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=3600)  # 1時間キャッシュ
     def get_ranking_users():
         docs = list(db.collection("users").stream())
         return [d.to_dict() for d in docs]
