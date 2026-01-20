@@ -184,7 +184,7 @@ def analyze_pdf(uploaded_file, show_name, user_nickname):
 # 3. ログイン画面（高速・安定版）
 # =========================================================
 
-@st.cache_data(ttl=3600)  # 1時間キャッシュ
+@st.cache_data  # 手動更新まで永続キャッシュ
 def get_users_min():
     """
     ログイン用の最小データのみ取得（キャッシュ）
@@ -234,7 +234,15 @@ def login_page():
             name = st.selectbox("名前を選択", ["選択してください"] + user_names)
             password = st.text_input("パスワード", type="password")
 
-            if st.button("ログイン", type="primary"):
+            col_login, col_refresh = st.columns([2, 1])
+            with col_login:
+                login_clicked = st.button("ログイン", type="primary", use_container_width=True)
+            with col_refresh:
+                if st.button("🔄", help="ユーザー一覧を更新", use_container_width=True):
+                    st.cache_data.clear()
+                    st.rerun()
+
+            if login_clicked:
                 if name != "選択してください":
                     u = user_dict[name]
                     if u["password"] == password:
@@ -291,7 +299,7 @@ if menu == "👨‍🏫 先生メニュー":
             batch.commit()
             st.success("登録しました")
     with tab2:
-        @st.cache_data(ttl=3600)  # 1時間キャッシュ
+        @st.cache_data  # 手動更新まで永続キャッシュ
         def get_grades_data():
             docs = db.collection("users").stream()
             data = []
@@ -531,7 +539,7 @@ elif menu == "🏆 ランキング":
 
     st.header("🏆 ジャンル別ランキング（全表示）")
 
-    @st.cache_data(ttl=3600)  # 1時間キャッシュ
+    @st.cache_data  # 手動更新まで永続キャッシュ
     def get_ranking_users():
         docs = list(db.collection("users").stream())
         return [d.to_dict() for d in docs]
